@@ -12,6 +12,8 @@ import { VpcNetworksPage } from './components/VpcNetworksPage';
 import { SubnetsPage } from './components/SubnetsPage';
 import { VmInstancesPage } from './components/VmInstancesPage';
 import { DisksPage } from './components/DisksPage';
+import { SnapshotsPage } from './components/SnapshotsPage';
+import { InstanceGroupsPage } from './components/InstanceGroupsPage';
 import { RoutesPage } from './components/RoutesPage';
 import { LoadBalancerPage } from './components/LoadBalancerPage';
 import { FirewallPoliciesPage } from './components/FirewallPoliciesPage';
@@ -33,6 +35,8 @@ const SECTIONS: Section[] = [
   { id: 'netlab-subnets', label: 'Subnetworks', render: () => <SubnetsPage /> },
   { id: 'netlab-vms', label: 'VM instances', render: () => <VmInstancesPage /> },
   { id: 'netlab-disks', label: 'Persistent disks', render: () => <DisksPage /> },
+  { id: 'netlab-snapshots', label: 'Snapshots', render: () => <SnapshotsPage /> },
+  { id: 'netlab-instance-groups', label: 'Instance groups', render: () => <InstanceGroupsPage /> },
   { id: 'netlab-routes', label: 'Routes', render: () => <RoutesPage /> },
   { id: 'netlab-loadbalancers', label: 'Load balancing', render: () => <LoadBalancerPage /> },
   { id: 'netlab-firewall', label: 'Firewall policies', render: () => <FirewallPoliciesPage /> },

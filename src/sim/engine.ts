@@ -774,6 +774,21 @@ export function attachDisk(state: SimState, diskId: string, vmId: string): SimRe
     );
   }
 
+  // A disk belongs to one VPC network in this model, so an attach that crosses
+  // networks would leave the disk unreachable from the instance's network.
+  if (disk.vpcId && vm.vpcId && disk.vpcId !== vm.vpcId) {
+    return logFailure(
+      state,
+      'compute.instances.attachDisk',
+      `disks/${disk.name}`,
+      err(
+        'INVALID_STATE',
+        `Disk "${disk.name}" belongs to a different VPC network than VM "${vm.name}".`,
+        'Create the disk inside the VPC network that hosts the VM.'
+      )
+    );
+  }
+
   const next = logEvent(
     {
       ...state,
@@ -1116,6 +1131,25 @@ export function setLoadBalancerBackends(
 ): SimResult<{ state: SimState }> {
   const lb = state.loadBalancers.find((l) => l.id === lbId);
   if (!lb) return logFailure(state, 'compute.backendServices.update', `backendServices/${lbId}`, notFound('Load balancer'));
+
+  // Without this a typo silently removes capacity, and the load balancer appears
+  // to run with no backends instead of reporting the bad input.
+  for (const vmId of backendVmIds) {
+    const vm = state.vms.find((v) => v.id === vmId);
+    if (!vm) return logFailure(state, 'compute.backendServices.update', `backendServices/${lb.name}`, notFound('Backend VM'));
+    if (vm.vpcId !== lb.vpcId) {
+      return logFailure(
+        state,
+        'compute.backendServices.update',
+        `backendServices/${lb.name}`,
+        err(
+          'INVALID_STATE',
+          `Backend VM "${vm.name}" is in a different VPC network than the load balancer.`,
+          'Add only VMs from the same VPC network as the load balancer.'
+        )
+      );
+    }
+  }
 
   const next = logEvent(
     {
@@ -1961,7 +1995,14 @@ export function createInstanceGroup(
 
   // Create the initial instances through the resize path so creation and later
   // scaling behave identically.
-  const resized = resizeInstanceGroup({ ...idResult.state, instanceGroups: [...idResult.state.instanceGroups, group] }, group.id, targetSize);
+  const inserted = logEvent(
+    { ...idResult.state, instanceGroups: [...idResult.state.instanceGroups, group] },
+    'compute.instanceGroups.insert',
+    `projects/${state.project.projectNumber}/zones/${template.zone}/instanceGroups/${group.name}`,
+    'SUCCESS',
+    `targetSize=${targetSize}, minSize=${minSize}, maxSize=${maxSize}`
+  );
+  const resized = resizeInstanceGroup(inserted, group.id, targetSize);
   if (!resized.ok) return resized;
 
   const finalGroup = resized.value.group;

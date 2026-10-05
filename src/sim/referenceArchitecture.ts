@@ -76,8 +76,13 @@ export function buildThreeTierErp(options?: {
   appSize?: number;
 }): ThreeTierArchitecture {
   const region = options?.region ?? 'us-central1';
-  const webSize = options?.webSize ?? 2;
-  const appSize = options?.appSize ?? 3;
+
+  // The autoscaling bounds below are the contract. Clamping the requested size
+  // keeps a one-click build from failing on a size it cannot honour, and matches
+  // how an autoscaler treats an out-of-bounds target.
+  const clamp = (want: number, min: number, max: number) => Math.max(min, Math.min(max, Math.trunc(want)));
+  const webSize = clamp(options?.webSize ?? 2, 2, 6);
+  const appSize = clamp(options?.appSize ?? 3, 2, 8);
 
   let s = createInitialState();
 
@@ -126,10 +131,13 @@ export function buildThreeTierErp(options?: {
     },
   ];
 
+  const policyIds: Record<string, string> = {};
+
   for (const spec of policySpecs) {
     const created = createNsg(s, { name: spec.name, vpcId });
     s = step(s, `create policy ${spec.name}`, created);
     const nsgId = created.ok ? created.value.nsg.id : '';
+    policyIds[spec.name] = nsgId;
     s = step(s, `attach policy ${spec.name}`, attachNsg(s, nsgId, { subnetIds: [spec.subnetId] }));
     for (const r of spec.rules) {
       s = step(s, `add rule ${r.name}`, addRule(s, nsgId, r));
@@ -185,6 +193,29 @@ export function buildThreeTierErp(options?: {
   });
   s = step(s, 'create external load balancer', externalLb);
 
+  // Health checks arrive from the load balancer's own frontend address, so each
+  // tier has to admit it explicitly. Without this the tiers correctly report
+  // zero healthy backends and the architecture looks broken.
+  const allowHealthCheck = (from: SimState, nsgId: string, fromIp: string, port: string, label: string) =>
+    addRule(from, nsgId, rule({
+      name: `allow-hc-${label}`,
+      direction: 'ingress',
+      action: 'allow',
+      priority: 1020,
+      protocol: 'tcp',
+      portRange: port,
+      sourceCidr: `${fromIp}/32`,
+      description: `Health check from ${fromIp}.`,
+    }));
+
+  if (externalLb.ok) {
+    s = step(
+      s,
+      'allow web health check',
+      allowHealthCheck(s, policyIds['web-policy'], externalLb.value.lb.frontendIp, '80', 'web')
+    );
+  }
+
   const internalLb = createLoadBalancer(s, {
     name: 'db-lb',
     type: 'internal-tcp',
@@ -195,6 +226,14 @@ export function buildThreeTierErp(options?: {
     healthCheckPort: 5432,
   });
   s = step(s, 'create internal load balancer', internalLb);
+
+  if (internalLb.ok) {
+    s = step(
+      s,
+      'allow db health check',
+      allowHealthCheck(s, policyIds['db-policy'], internalLb.value.lb.frontendIp, '5432', 'db')
+    );
+  }
 
   return {
     state: s,

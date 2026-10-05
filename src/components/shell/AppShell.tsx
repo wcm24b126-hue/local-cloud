@@ -159,6 +159,8 @@ export const AppShell: React.FC = () => {
       case 'netlab-subnets':
       case 'netlab-vms':
       case 'netlab-disks':
+      case 'netlab-snapshots':
+      case 'netlab-instance-groups':
       case 'netlab-routes':
       case 'netlab-loadbalancers':
       case 'netlab-firewall':

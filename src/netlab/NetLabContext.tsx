@@ -26,14 +26,21 @@ import {
   attachInternetGateway,
   attachNsg,
   createDisk,
+  createInstanceGroup,
+  createInstanceTemplate,
+  createSnapshot,
   createInitialState,
   createLoadBalancer,
   createNsg,
+  resizeInstanceGroup,
   createRoute,
   createSubnet,
   createVm,
   createVpc,
   deleteDisk,
+  deleteInstanceGroup,
+  deleteInstanceTemplate,
+  deleteSnapshot,
   deleteLoadBalancer,
   deleteNsg,
   deleteRoute,
@@ -50,6 +57,7 @@ import {
 import { isNetlabCommand, runNetlabCommand } from '../sim/cli';
 import { DELAYS, getSpeed, simulateDelay } from '../sim/env';
 import { evaluatePacket } from '../sim/packetTracer';
+import { buildThreeTierErp } from '../sim/referenceArchitecture';
 import { buildSampleNetwork } from '../sim/seed';
 import { Packet, SimResult, SimState, TraceRecord } from '../sim/types';
 import { createPersistenceAdapter, LocalStorageAdapter } from './persistence';
@@ -124,6 +132,31 @@ interface NetLabContextValue {
   detachDiskFromVm: (diskId: string) => Promise<boolean>;
   removeDisk: (id: string) => Promise<boolean>;
 
+  // Snapshots
+  createSnapshotResource: (input: { name: string; diskId: string; storageClass?: 'STANDARD' | 'NEARLINE' | 'COLDLINE' | 'ARCHIVE' }) => Promise<boolean>;
+  removeSnapshot: (id: string) => Promise<boolean>;
+
+  // Instance templates and managed instance groups
+  createTemplateResource: (input: {
+    name: string;
+    subnetId: string;
+    zone?: string;
+    machineType?: string;
+    networkTags?: string[];
+    bootDiskSizeGb?: number;
+    withExternalIp?: boolean;
+  }) => Promise<boolean>;
+  removeTemplate: (id: string) => Promise<boolean>;
+  createGroupResource: (input: {
+    name: string;
+    templateId: string;
+    targetSize?: number;
+    minSize?: number;
+    maxSize?: number;
+  }) => Promise<boolean>;
+  resizeGroup: (id: string, targetSize: number) => Promise<boolean>;
+  removeGroup: (id: string) => Promise<boolean>;
+
   // Gateway and routes
   attachGateway: (name: string, vpcId: string) => Promise<boolean>;
   detachGateway: (id: string) => Promise<boolean>;
@@ -176,6 +209,11 @@ interface NetLabContextValue {
 
   // Lab management
   loadSample: () => void;
+  /**
+   * Replace the lab with the one-click three-tier ERP reference architecture.
+   * Useful for teaching tiered networking without building 40 resources by hand.
+   */
+  loadErpArchitecture: () => void;
   resetLab: () => void;
 
   /**
@@ -400,6 +438,49 @@ export const NetLabProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   /* ---------------------------------------------------------------- */
+  /* Snapshots, templates and managed instance groups                 */
+  /* ---------------------------------------------------------------- */
+
+  const createSnapshotResource = useCallback(
+    async (input: Parameters<typeof createSnapshot>[1]) =>
+      runMutation((s) => createSnapshot(s, input), { delayMs: DELAYS.resourceCreate, pendingLabel: 'Snapshot' }),
+    [runMutation]
+  );
+
+  const removeSnapshot = useCallback(
+    async (id: string) => runMutation((s) => deleteSnapshot(s, id), { delayMs: DELAYS.delete }),
+    [runMutation]
+  );
+
+  const createTemplateResource = useCallback(
+    async (input: Parameters<typeof createInstanceTemplate>[1]) =>
+      runMutation((s) => createInstanceTemplate(s, input), { delayMs: DELAYS.resourceCreate, pendingLabel: 'Instance template' }),
+    [runMutation]
+  );
+
+  const removeTemplate = useCallback(
+    async (id: string) => runMutation((s) => deleteInstanceTemplate(s, id), { delayMs: DELAYS.delete }),
+    [runMutation]
+  );
+
+  const createGroupResource = useCallback(
+    async (input: Parameters<typeof createInstanceGroup>[1]) =>
+      runMutation((s) => createInstanceGroup(s, input), { delayMs: DELAYS.resourceCreate, pendingLabel: 'Instance group' }),
+    [runMutation]
+  );
+
+  const resizeGroup = useCallback(
+    async (id: string, targetSize: number) =>
+      runMutation((s) => resizeInstanceGroup(s, id, targetSize), { delayMs: DELAYS.attach }),
+    [runMutation]
+  );
+
+  const removeGroup = useCallback(
+    async (id: string) => runMutation((s) => deleteInstanceGroup(s, id), { delayMs: DELAYS.delete }),
+    [runMutation]
+  );
+
+  /* ---------------------------------------------------------------- */
   /* Gateway and routes                                               */
   /* ---------------------------------------------------------------- */
 
@@ -539,6 +620,20 @@ export const NetLabProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     notify('info', 'Sample network loaded. Open the Packet tracer to run the four demo traces.');
   }, [notify]);
 
+  const loadErpArchitecture = useCallback(() => {
+    try {
+      setState(buildThreeTierErp().state);
+      setCurrentTrace(null);
+      setLabProgress({});
+      notify(
+        'success',
+        'Three-tier ERP architecture loaded: 3 subnets, 3 firewall policies, 3 managed groups, 2 load balancers.'
+      );
+    } catch (error) {
+      notify('error', 'The reference architecture could not be built.', String(error));
+    }
+  }, [notify]);
+
   const resetLab = useCallback(() => {
     setState(createInitialState());
     setCurrentTrace(null);
@@ -635,6 +730,13 @@ export const NetLabProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       attachDiskToVm,
       detachDiskFromVm,
       removeDisk,
+      createSnapshotResource,
+      removeSnapshot,
+      createTemplateResource,
+      removeTemplate,
+      createGroupResource,
+      resizeGroup,
+      removeGroup,
       attachGateway,
       detachGateway,
       createRouteResource,
@@ -651,6 +753,7 @@ export const NetLabProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       sendPacket,
       clearTraces,
       loadSample,
+      loadErpArchitecture,
       resetLab,
       runShellCommand,
       exportLab,
@@ -680,6 +783,13 @@ export const NetLabProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       attachDiskToVm,
       detachDiskFromVm,
       removeDisk,
+      createSnapshotResource,
+      removeSnapshot,
+      createTemplateResource,
+      removeTemplate,
+      createGroupResource,
+      resizeGroup,
+      removeGroup,
       attachGateway,
       detachGateway,
       createRouteResource,
@@ -696,6 +806,7 @@ export const NetLabProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       sendPacket,
       clearTraces,
       loadSample,
+      loadErpArchitecture,
       resetLab,
       runShellCommand,
       exportLab,

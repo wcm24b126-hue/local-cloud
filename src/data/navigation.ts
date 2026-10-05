@@ -318,6 +318,8 @@ export const NAVIGATION_PRODUCTS: NavigationProduct[] = [
           { title: 'Lab subnetworks', path: 'netlab-subnets' },
           { title: 'Lab VM instances', path: 'netlab-vms' },
           { title: 'Lab persistent disks', path: 'netlab-disks' },
+          { title: 'Lab snapshots', path: 'netlab-snapshots' },
+          { title: 'Lab instance groups', path: 'netlab-instance-groups' },
           { title: 'Lab routes', path: 'netlab-routes' },
           { title: 'Lab load balancing', path: 'netlab-loadbalancers' },
           { title: 'Lab firewall policies', path: 'netlab-firewall' },
