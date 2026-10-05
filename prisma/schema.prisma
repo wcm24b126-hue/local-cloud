@@ -1,0 +1,544 @@
+// Prisma Schema for LocalCloud (Local Google Cloud Platform Emulator)
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// PHASE 1: Resource Manager, IAM, Billing, APIs
+// ==========================================
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String
+  avatarUrl     String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  iamBindings   IamBinding[]
+  favourites    FavouriteProduct[]
+  recentVisits  RecentVisit[]
+  labProgress   LabProgress[]
+}
+
+model Project {
+  id                String               @id @default(cuid())
+  name              String
+  projectId         String               @unique
+  projectNumber     String               @unique
+  billingAccountId  String?
+  deleteTime        DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  billingLink       ProjectBillingLink?
+  iamBindings       IamBinding[]
+  serviceAccounts   ServiceAccount[]
+  enabledApis       EnabledApi[]
+  auditLogs         AuditLog[]
+  operations        Operation[]
+
+  // Future phase relations (stubs)
+  buckets           Bucket[]
+  vmInstances       VmInstance[]
+  disks             Disk[]
+  networks          Network[]
+  sqlInstances      SqlInstance[]
+  pubSubTopics      PubSubTopic[]
+  cloudRunServices  CloudRunService[]
+  secrets           Secret[]
+  logEntries        LogEntry[]
+}
+
+model BillingAccount {
+  id             String               @id @default(cuid())
+  name           String
+  accountNumber  String               @unique
+  status         String               @default("OPEN") // OPEN, CLOSED
+  virtualBalance Float                @default(300.0)  // $300 virtual credit
+  totalSpent     Float                @default(0.0)
+  currency       String               @default("USD")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  projectLinks   ProjectBillingLink[]
+}
+
+model ProjectBillingLink {
+  id               String         @id @default(cuid())
+  projectId        String         @unique
+  billingAccountId String
+  enabled          Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  project          Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  billingAccount   BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([billingAccountId])
+}
+
+model EnabledApi {
+  id          String   @id @default(cuid())
+  projectId   String
+  apiName     String   // e.g. compute.googleapis.com, storage.googleapis.com
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, apiName])
+  @@index([projectId])
+}
+
+model IamBinding {
+  id             String   @id @default(cuid())
+  projectId      String
+  principal      String   // e.g. user:alice@example.com, serviceAccount:name@proj.iam.gserviceaccount.com
+  principalType  String   // user, serviceAccount, group
+  role           String   // e.g. roles/owner, roles/viewer, roles/compute.admin
+  condition      String?
+  inheritedFrom  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user           User?    @relation(fields: [userId], references: [id])
+  userId         String?
+
+  @@index([projectId])
+  @@index([principal])
+}
+
+model ServiceAccount {
+  id           String              @id @default(cuid())
+  projectId    String
+  name         String
+  displayName  String
+  email        String              @unique
+  description  String?
+  disabled     Boolean             @default(false)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  project      Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  keys         ServiceAccountKey[]
+
+  @@index([projectId])
+}
+
+model ServiceAccountKey {
+  id               String         @id @default(cuid())
+  serviceAccountId String
+  keyAlgorithm     String         @default("KEY_ALG_RSA_2048")
+  privateKeyData   String         // Simulated JSON or PEM
+  validAfter       DateTime       @default(now())
+  validBefore      DateTime
+  createdAt        DateTime       @default(now())
+
+  serviceAccount   ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+
+  @@index([serviceAccountId])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  projectId    String
+  principal    String
+  service      String   // e.g. compute.googleapis.com
+  method       String   // e.g. instances.insert
+  resourceName String
+  status       String   // SUCCESS, DENIED, FAILED
+  details      String?
+  timestamp    DateTime @default(now())
+
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([timestamp])
+}
+
+model Operation {
+  id            String    @id @default(cuid())
+  projectId     String
+  operationType String    // e.g. insert, delete, update
+  targetLink    String    // URI to target resource
+  status        String    // PENDING, RUNNING, DONE
+  progress      Int       @default(0)
+  startTime     DateTime  @default(now())
+  endTime       DateTime?
+  error         String?
+
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model FavouriteProduct {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String   // e.g. compute, storage, billing
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+}
+
+model RecentVisit {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  productName String
+  path        String
+  timestamp   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model LabProgress {
+  id          String   @id @default(cuid())
+  userId      String
+  labId       String
+  completed   Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, labId])
+}
+
+// ==========================================
+// PHASE 2+: STUBS FOR FUTURE SERVICES
+// ==========================================
+
+model Bucket {
+  id               String          @id @default(cuid())
+  projectId        String
+  name             String          @unique
+  location         String          @default("US-CENTRAL1")
+  locationType     String          @default("Region") // Region, Dual-region, Multi-region
+  storageClass     String          @default("STANDARD")
+  versioning       Boolean         @default(false)
+  deleteTime       DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  project          Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  objects          StorageObject[]
+  lifecycleRules   LifecycleRule[]
+
+  @@index([projectId])
+}
+
+model StorageObject {
+  id          String    @id @default(cuid())
+  bucketId    String
+  name        String
+  contentType String    @default("application/octet-stream")
+  size        Int       @default(0)
+  md5Hash     String?
+  localPath   String?   // path on local storage volume
+  deleteTime  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  bucket      Bucket    @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+
+  @@index([bucketId])
+}
+
+model LifecycleRule {
+  id        String   @id @default(cuid())
+  bucketId  String
+  action    String   // Delete, SetStorageClass
+  condition String   // Age in days, matchesPrefix, etc. (JSON)
+  createdAt DateTime @default(now())
+
+  bucket    Bucket   @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+
+  @@index([bucketId])
+}
+
+model VmInstance {
+  id          String    @id @default(cuid())
+  projectId   String
+  name        String
+  zone        String    @default("us-central1-a")
+  machineType String    @default("e2-micro")
+  status      String    @default("RUNNING") // PROVISIONING, STAGING, RUNNING, STOPPING, TERMINATED
+  internalIp  String    @default("10.128.0.2")
+  externalIp  String?
+  deleteTime  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model Disk {
+  id         String    @id @default(cuid())
+  projectId  String
+  name       String
+  zone       String    @default("us-central1-a")
+  sizeGb     Int       @default(10)
+  type       String    @default("pd-standard")
+  deleteTime DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model Network {
+  id          String        @id @default(cuid())
+  projectId   String
+  name        String        @default("default")
+  autoSubnets Boolean       @default(true)
+  deleteTime  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subnets     Subnetwork[]
+  firewalls   FirewallRule[]
+
+  @@index([projectId])
+}
+
+model Subnetwork {
+  id        String   @id @default(cuid())
+  networkId String
+  name      String
+  region    String
+  ipCidr    String
+  createdAt DateTime @default(now())
+
+  network   Network  @relation(fields: [networkId], references: [id], onDelete: Cascade)
+
+  @@index([networkId])
+}
+
+model FirewallRule {
+  id          String   @id @default(cuid())
+  networkId   String
+  name        String
+  direction   String   @default("INGRESS")
+  priority    Int      @default(1000)
+  action      String   @default("ALLOW")
+  protocols   String   // tcp:80, tcp:443, etc.
+  sourceRanges String  @default("0.0.0.0/0")
+  createdAt   DateTime @default(now())
+
+  network     Network  @relation(fields: [networkId], references: [id], onDelete: Cascade)
+
+  @@index([networkId])
+}
+
+model SqlInstance {
+  id             String        @id @default(cuid())
+  projectId      String
+  name           String
+  databaseVersion String       @default("POSTGRES_16")
+  tier           String        @default("db-f1-micro")
+  region         String        @default("us-central1")
+  state          String        @default("RUNNABLE")
+  createdAt      DateTime      @default(now())
+
+  project        Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  databases      SqlDatabase[]
+
+  @@index([projectId])
+}
+
+model SqlDatabase {
+  id         String      @id @default(cuid())
+  instanceId String
+  name       String
+  charset    String      @default("UTF8")
+  collation  String      @default("en_US.UTF8")
+  createdAt  DateTime    @default(now())
+
+  instance   SqlInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId])
+}
+
+model PubSubTopic {
+  id            String               @id @default(cuid())
+  projectId     String
+  name          String
+  createdAt     DateTime             @default(now())
+
+  project       Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subscriptions PubSubSubscription[]
+
+  @@index([projectId])
+}
+
+model PubSubSubscription {
+  id         String          @id @default(cuid())
+  topicId    String
+  name       String
+  ackDeadline Int            @default(10)
+  createdAt  DateTime        @default(now())
+
+  topic      PubSubTopic     @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  messages   PubSubMessage[]
+
+  @@index([topicId])
+}
+
+model PubSubMessage {
+  id             String             @id @default(cuid())
+  subscriptionId String
+  data           String
+  attributes     String?            // JSON
+  publishTime    DateTime           @default(now())
+  ackState       String             @default("UNACKED") // UNACKED, ACKED
+
+  subscription   PubSubSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+}
+
+model CloudRunService {
+  id                      String                 @id @default(cuid())
+  projectId               String
+  name                    String
+  description             String?
+  region                  String                 @default("us-central1")
+  url                     String
+  status                  String                 @default("READY") // READY, DEPLOYING, FAILED
+  activeInstances         Int                    @default(0)
+  allowUnauthenticated    Boolean                @default(true)
+  ingress                 String                 @default("all") // all, internal, internal-and-cloud-load-balancing
+  latestCreatedRevision   String?
+  latestReadyRevision     String?
+  creator                 String                 @default("student@localcloud.dev")
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+
+  project                 Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revisions               CloudRunRevision[]
+  traffic                 CloudRunTrafficTarget[]
+
+  @@unique([projectId, name, region])
+  @@index([projectId])
+}
+
+model CloudRunRevision {
+  id              String                 @id @default(cuid())
+  serviceId       String
+  name            String                 // e.g. hello-service-00001-xyz
+  image           String                 // container image URI (e.g. gcr.io/google-samples/hello-app:1.0)
+  sourceType      String                 @default("IMAGE") // IMAGE, NODE, PYTHON
+  sourceCode      String?                // source snippet if built from source
+  cpu             String                 @default("1")
+  memory          String                 @default("512Mi")
+  minInstances    Int                    @default(0)
+  maxInstances    Int                    @default(100)
+  concurrency     Int                    @default(80)
+  timeoutSeconds  Int                    @default(300)
+  port            Int                    @default(8080)
+  status          String                 @default("Ready") // Ready, Progressing, Failed
+  trafficPercent  Int                    @default(0)
+  activeInstances Int                    @default(0)
+  author          String                 @default("student@localcloud.dev")
+  createdAt       DateTime               @default(now())
+
+  service         CloudRunService        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  envVars         CloudRunEnvVar[]
+  trafficTargets  CloudRunTrafficTarget[]
+
+  @@unique([serviceId, name])
+  @@index([serviceId])
+}
+
+model CloudRunEnvVar {
+  id          String           @id @default(cuid())
+  revisionId  String
+  name        String
+  value       String
+
+  revision    CloudRunRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@unique([revisionId, name])
+  @@index([revisionId])
+}
+
+model CloudRunTrafficTarget {
+  id              String            @id @default(cuid())
+  serviceId       String
+  revisionId      String?
+  revisionName    String
+  percent         Int               @default(100)
+  latestRevision  Boolean           @default(true)
+  tag             String?
+
+  service         CloudRunService   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  revision        CloudRunRevision? @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+
+  @@index([serviceId])
+}
+
+model Secret {
+  id          String          @id @default(cuid())
+  projectId   String
+  name        String
+  createdAt   DateTime        @default(now())
+
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions    SecretVersion[]
+
+  @@index([projectId])
+}
+
+model SecretVersion {
+  id        String   @id @default(cuid())
+  secretId  String
+  version   Int      @default(1)
+  payload   String
+  state     String   @default("ENABLED")
+  createdAt DateTime @default(now())
+
+  secret    Secret   @relation(fields: [secretId], references: [id], onDelete: Cascade)
+
+  @@index([secretId])
+}
+
+model LogEntry {
+  id          String   @id @default(cuid())
+  projectId   String
+  logName     String   // e.g. projects/.../logs/cloudaudit.googleapis.com
+  severity    String   @default("INFO")
+  payloadText String?
+  payloadJson String?
+  timestamp   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([timestamp])
+}
+
+model MetricPoint {
+  id         String   @id @default(cuid())
+  metricType String   // e.g. compute.googleapis.com/instance/cpu/utilization
+  resourceId String
+  value      Float
+  timestamp  DateTime @default(now())
+
+  @@index([metricType, timestamp])
+}

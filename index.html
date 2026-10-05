@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Safeguard against iframe/sandbox environments where window.fetch has only a getter
+      (function() {
+        try {
+          let target = window;
+          let desc = Object.getOwnPropertyDescriptor(target, 'fetch');
+          if (!desc) {
+            target = Object.getPrototypeOf(window);
+            desc = target ? Object.getOwnPropertyDescriptor(target, 'fetch') : null;
+          }
+          if (desc && !desc.set && desc.configurable !== false) {
+            const origGet = desc.get;
+            let currentFetch = origGet ? origGet.call(window) : window.fetch;
+            Object.defineProperty(window, 'fetch', {
+              get() {
+                return currentFetch || (origGet ? origGet.call(this) : undefined);
+              },
+              set(val) {
+                currentFetch = val;
+              },
+              configurable: true,
+              enumerable: true,
+            });
+          }
+        } catch (_) {}
+
+        window.addEventListener('error', function(event) {
+          if (event && event.message && event.message.includes('Cannot set property fetch of')) {
+            event.preventDefault();
+            return true;
+          }
+        }, true);
+      })();
+    </script>
+    <title>LocalCloud - Local GCP Emulator & Console</title>
+    <meta name="description" content="A lightweight, fully local Google Cloud Platform emulator with a complete web console UI, interactive Cloud Shell, IAM, Billing, and API emulation for students and developers." />
+    <meta property="og:title" content="LocalCloud - Local GCP Emulator & Console" />
+    <meta property="og:description" content="A lightweight, fully local Google Cloud Platform emulator with a complete web console UI, interactive Cloud Shell, IAM, Billing, and API emulation for students and developers." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+  <body class="bg-[#131314] text-[#e8eaed] antialiased selection:bg-[#8ab4f8]/30 selection:text-[#8ab4f8]">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

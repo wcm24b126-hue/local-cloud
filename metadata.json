@@ -1,0 +1,6 @@
+{
+  "name": "LocalCloud - Local GCP Emulator & Console",
+  "description": "A lightweight, fully local Google Cloud Platform emulator with a complete web console UI, interactive Cloud Shell, IAM, Billing, and API emulation for students and developers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-shell: #131314;
+    --bg-header: #202124;
+    --bg-surface: #1e1f20;
+    --bg-canvas: #0e0e0f;
+    --border-color: #3c4043;
+    --border-subtle: #2d3135;
+    --text-primary: #e8eaed;
+    --text-secondary: #9aa0a6;
+    --text-muted: #80868b;
+    --accent-blue: #8ab4f8;
+    --accent-hover: #aecbfa;
+    --accent-blue-bg: rgba(138, 180, 248, 0.08);
+    --accent-blue-border: rgba(138, 180, 248, 0.3);
+    --danger: #f28b82;
+    --success: #81c995;
+    --warning: #fdd663;
+    --card-hover: #28292c;
+  }
+
+  .light {
+    --bg-shell: #f8f9fa;
+    --bg-header: #ffffff;
+    --bg-surface: #ffffff;
+    --bg-canvas: #f1f3f4;
+    --border-color: #dadce0;
+    --border-subtle: #e8eaed;
+    --text-primary: #202124;
+    --text-secondary: #5f6368;
+    --text-muted: #80868b;
+    --accent-blue: #1a73e8;
+    --accent-hover: #174ea6;
+    --accent-blue-bg: rgba(26, 115, 232, 0.08);
+    --accent-blue-border: rgba(26, 115, 232, 0.3);
+    --danger: #d93025;
+    --success: #188038;
+    --warning: #f29900;
+    --card-hover: #f8f9fa;
+  }
+}
+
+body {
+  font-family: "Plus Jakarta Sans", "Google Sans", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--bg-shell);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
+
+code, pre, .font-mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Custom scrollbar matching Google Cloud Console */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3c4043;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #5f6368;
+}
+.light ::-webkit-scrollbar-thumb {
+  background: #dadce0;
+}
+.light ::-webkit-scrollbar-thumb:hover {
+  background: #bdc1c6;
+}

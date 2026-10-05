@@ -1,0 +1,6 @@
+allowBuilds:
+  # esbuild's postinstall links the platform binary; without it vite/tsx fail to run.
+  esbuild: true
+  # These packages ship prebuilt artifacts and do not need install scripts.
+  '@google/genai': false
+  protobufjs: false
