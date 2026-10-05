@@ -121,6 +121,67 @@ export interface LoadBalancer {
   createdAt: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Disk snapshots                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A point-in-time copy of a persistent disk.
+ *
+ * GCP does not replicate volumes between zones or regions: regional disks are
+ * the closest thing, and a snapshot is the portable copy. Snapshots are modelled
+ * as global objects that can create a new disk in any zone.
+ */
+export interface DiskSnapshot {
+  id: string;
+  name: string;
+  sourceDiskId: string;
+  sizeGb: number;
+  type: Disk['type'];
+  /** Storage class, mirroring GCS snapshot storage classes. */
+  storageClass: 'STANDARD' | 'NEARLINE' | 'COLDLINE' | 'ARCHIVE';
+  status: 'CREATING' | 'READY' | 'DELETING' | 'DELETED';
+  createdAt: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Instance templates and managed instance groups                      */
+/* ------------------------------------------------------------------ */
+
+/** The machine shape a group clones. Mirrors a GCP instance template. */
+export interface InstanceTemplate {
+  id: string;
+  name: string;
+  vpcId: string;
+  subnetId: string;
+  zone: string;
+  machineType: string;
+  networkTags: string[];
+  /** Boot disk size the template provisions for each clone. */
+  bootDiskSizeGb: number;
+  withExternalIp: boolean;
+  status: 'CREATING' | 'READY' | 'DELETING' | 'DELETED';
+  createdAt: string;
+}
+
+/**
+ * A managed instance group: a target size the platform maintains by creating or
+ * deleting VMs from an instance template. Autoscaling is expressed as the target
+ * plus optional min/max bounds, which is how GCP models it too.
+ */
+export interface InstanceGroup {
+  id: string;
+  name: string;
+  templateId: string;
+  targetSize: number;
+  minSize: number;
+  maxSize: number;
+  /** Ids of the VMs the group currently owns, in creation order. */
+  vmIds: string[];
+  status: 'CREATING' | 'STABLE' | 'SCALING' | 'DELETING' | 'DELETED';
+  createdAt: string;
+}
+
 export type NsgStatus = 'CREATING' | 'READY' | 'DELETING' | 'DELETED';
 
 export interface Nsg {
@@ -182,6 +243,10 @@ export interface SimState {
   gateways: InternetGateway[];
   routes: Route[];
   loadBalancers: LoadBalancer[];
+  /** Backend service member groups; resolved to VMs for health checks. */
+  instanceTemplates: InstanceTemplate[];
+  instanceGroups: InstanceGroup[];
+  snapshots: DiskSnapshot[];
   nsgs: Nsg[];
   events: EventLogEntry[];
   traces: TraceRecord[];

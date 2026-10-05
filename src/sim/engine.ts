@@ -27,7 +27,10 @@ import {
 } from './ip';
 import {
   Disk,
+  DiskSnapshot,
   EventLogEntry,
+  InstanceGroup,
+  InstanceTemplate,
   InternetGateway,
   LoadBalancer,
   LoadBalancerType,
@@ -72,6 +75,9 @@ export function createInitialState(project?: Partial<Project>): SimState {
     gateways: [],
     routes: [],
     loadBalancers: [],
+    instanceTemplates: [],
+    instanceGroups: [],
+    snapshots: [],
     nsgs: [],
     events: [],
     traces: [],
@@ -1537,3 +1543,487 @@ export function pickBackend(lb: LoadBalancer, healthy: Vm[], sourceIp: string, s
 }
 
 export { ipInCidr, isValidIpv4, parseCidr };
+/* ------------------------------------------------------------------ */
+/* Disk snapshots                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Snapshot a persistent disk.
+ *
+ * GCP has no volume replication: a regional persistent disk is the multi-zone
+ * option, and a snapshot is the portable copy. A snapshot captures the disk's
+ * size and type, so it can seed a new disk anywhere.
+ */
+export function createSnapshot(
+  state: SimState,
+  input: { name: string; diskId: string; storageClass?: DiskSnapshot['storageClass'] }
+): SimResult<{ state: SimState; snapshot: DiskSnapshot }> {
+  const nameError = validateName(input.name, 'Snapshot');
+  if (nameError) return logFailure(state, 'compute.snapshots.insert', `snapshots/${input.name}`, nameError);
+  const dup = duplicateName(state.snapshots, input.name.trim(), 'Snapshot');
+  if (dup) return logFailure(state, 'compute.snapshots.insert', `snapshots/${input.name}`, dup);
+
+  const disk = state.disks.find((d) => d.id === input.diskId);
+  if (!disk) {
+    return logFailure(
+      state,
+      'compute.snapshots.insert',
+      `snapshots/${input.name}`,
+      notFound('Persistent disk')
+    );
+  }
+
+  // A snapshot of a deleted disk is impossible, and a disk mid-delete has no
+  // stable contents to copy.
+  if (disk.status === 'DELETING' || disk.status === 'DELETED') {
+    return logFailure(
+      state,
+      'compute.snapshots.insert',
+      `snapshots/${input.name}`,
+      err(
+        'INVALID_STATE',
+        `Disk "${disk.name}" is ${disk.status.toLowerCase()} and cannot be snapshotted.`,
+        'Wait for the disk to be READY or ATTACHED before taking a snapshot.'
+      )
+    );
+  }
+
+  const idResult = nextId(state, 'snap');
+  const snapshot: DiskSnapshot = {
+    id: idResult.id,
+    name: input.name.trim(),
+    sourceDiskId: disk.id,
+    sizeGb: disk.sizeGb,
+    type: disk.type,
+    storageClass: input.storageClass ?? 'STANDARD',
+    status: 'READY',
+    createdAt: new Date().toISOString(),
+  };
+
+  const next = logEvent(
+    { ...idResult.state, snapshots: [...idResult.state.snapshots, snapshot] },
+    'compute.snapshots.insert',
+    `projects/${state.project.projectNumber}/snapshots/${snapshot.name}`,
+    'SUCCESS'
+  );
+
+  return ok(
+    { state: next, snapshot },
+    `Snapshot "${snapshot.name}" created from "${disk.name}" (${snapshot.sizeGb} GB).`
+  );
+}
+
+/** Delete a snapshot. The source disk is unaffected, as in GCP. */
+export function deleteSnapshot(state: SimState, snapshotId: string): SimResult<{ state: SimState }> {
+  const snapshot = state.snapshots.find((s) => s.id === snapshotId);
+  if (!snapshot) return logFailure(state, 'compute.snapshots.delete', `snapshots/${snapshotId}`, notFound('Snapshot'));
+
+  const next = logEvent(
+    { ...state, snapshots: state.snapshots.filter((s) => s.id !== snapshotId) },
+    'compute.snapshots.delete',
+    `projects/${state.project.projectNumber}/snapshots/${snapshot.name}`,
+    'SUCCESS'
+  );
+  return ok({ state: next }, `Snapshot "${snapshot.name}" deleted.`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Instance templates                                                   */
+/* ------------------------------------------------------------------ */
+
+export function createInstanceTemplate(
+  state: SimState,
+  input: {
+    name: string;
+    subnetId: string;
+    zone?: string;
+    machineType?: string;
+    networkTags?: string[];
+    bootDiskSizeGb?: number;
+    withExternalIp?: boolean;
+  }
+): SimResult<{ state: SimState; template: InstanceTemplate }> {
+  const nameError = validateName(input.name, 'Instance template');
+  if (nameError) return logFailure(state, 'compute.instanceTemplates.insert', `instanceTemplates/${input.name}`, nameError);
+  const dup = duplicateName(state.instanceTemplates, input.name.trim(), 'Instance template');
+  if (dup) {
+    return logFailure(state, 'compute.instanceTemplates.insert', `instanceTemplates/${input.name}`, dup);
+  }
+
+  const subnet = findSubnet(state, input.subnetId);
+  if (!subnet) {
+    return logFailure(
+      state,
+      'compute.instanceTemplates.insert',
+      `instanceTemplates/${input.name}`,
+      notFound('Subnetwork')
+    );
+  }
+
+  const bootDiskSizeGb = input.bootDiskSizeGb ?? 10;
+  if (!Number.isInteger(bootDiskSizeGb) || bootDiskSizeGb < 1 || bootDiskSizeGb > 65536) {
+    return logFailure(
+      state,
+      'compute.instanceTemplates.insert',
+      `instanceTemplates/${input.name}`,
+      err(
+        'INVALID_ARGUMENT',
+        `Boot disk size ${bootDiskSizeGb} GB is out of range.`,
+        'Enter a whole number between 1 and 65536 GB.'
+      )
+    );
+  }
+
+  if (input.withExternalIp && !gatewayFor(state, subnet.vpcId)) {
+    return logFailure(
+      state,
+      'compute.instanceTemplates.insert',
+      `instanceTemplates/${input.name}`,
+      err(
+        'DEPENDENCY',
+        `Cannot request an external IP: no Internet Gateway is attached to VPC "${subnet.vpcId}".`,
+        'Attach an Internet Gateway to the VPC first, then create the template again.'
+      )
+    );
+  }
+
+  const idResult = nextId(state, 'tpl');
+  const template: InstanceTemplate = {
+    id: idResult.id,
+    name: input.name.trim(),
+    vpcId: subnet.vpcId,
+    subnetId: subnet.id,
+    zone: input.zone ?? DEFAULT_ZONE,
+    machineType: input.machineType ?? 'e2-medium',
+    networkTags: input.networkTags ?? [],
+    bootDiskSizeGb,
+    withExternalIp: input.withExternalIp ?? false,
+    status: 'READY',
+    createdAt: new Date().toISOString(),
+  };
+
+  const next = logEvent(
+    { ...idResult.state, instanceTemplates: [...idResult.state.instanceTemplates, template] },
+    'compute.instanceTemplates.insert',
+    `projects/${state.project.projectNumber}/global/instanceTemplates/${template.name}`,
+    'SUCCESS'
+  );
+
+  return ok({ state: next, template }, `Instance template "${template.name}" created (${template.machineType}).`);
+}
+
+export function deleteInstanceTemplate(
+  state: SimState,
+  templateId: string
+): SimResult<{ state: SimState }> {
+  const template = state.instanceTemplates.find((t) => t.id === templateId);
+  if (!template) {
+    return logFailure(state, 'compute.instanceTemplates.delete', `instanceTemplates/${templateId}`, notFound('Instance template'));
+  }
+
+  // A group cannot exist without the template it clones from.
+  const group = state.instanceGroups.find((g) => g.templateId === templateId);
+  if (group) {
+    return logFailure(
+      state,
+      'compute.instanceTemplates.delete',
+      `instanceTemplates/${template.name}`,
+      err(
+        'DEPENDENCY',
+        `Template "${template.name}" is still used by instance group "${group.name}".`,
+        'Delete the instance group first, then delete the template.'
+      )
+    );
+  }
+
+  const next = logEvent(
+    { ...state, instanceTemplates: state.instanceTemplates.filter((t) => t.id !== templateId) },
+    'compute.instanceTemplates.delete',
+    `projects/${state.project.projectNumber}/global/instanceTemplates/${template.name}`,
+    'SUCCESS'
+  );
+  return ok({ state: next }, `Instance template "${template.name}" deleted.`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Managed instance groups                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Materialise one VM from a template.
+ *
+ * Deliberately reuses createVm so a group clone is indistinguishable from a VM
+ * the learner created by hand: same validation, same allocation, same events.
+ * `isBootDisk` boot disk is included so the clone is self-contained.
+ */
+function createVmFromTemplate(
+  state: SimState,
+  template: InstanceTemplate,
+  name: string
+): SimResult<{ state: SimState; vm: Vm }> {
+  return createVm(state, {
+    name,
+    subnetId: template.subnetId,
+    zone: template.zone,
+    machineType: template.machineType,
+    networkTags: template.networkTags,
+    bootDiskSizeGb: template.bootDiskSizeGb,
+    withExternalIp: template.withExternalIp,
+  });
+}
+
+/**
+ * Resize a managed instance group, creating or deleting VMs to reach the target.
+ *
+ * New instances are named `<group>-<hash>` so repeated scaling is deterministic
+ * and never collides. The target is clamped to [minSize, maxSize], which is how
+ * GCP autoscaling behaves when a target falls outside the configured bounds.
+ */
+export function resizeInstanceGroup(
+  state: SimState,
+  groupId: string,
+  targetSize: number
+): SimResult<{ state: SimState; group: InstanceGroup }> {
+  const group = state.instanceGroups.find((g) => g.id === groupId);
+  if (!group) {
+    return logFailure(state, 'compute.instanceGroups.update', `instanceGroups/${groupId}`, notFound('Instance group'));
+  }
+
+  const template = state.instanceTemplates.find((t) => t.id === group.templateId);
+  if (!template) {
+    return logFailure(
+      state,
+      'compute.instanceGroups.update',
+      `instanceGroups/${group.name}`,
+      err('INVALID_STATE', `Instance template for "${group.name}" no longer exists.`, 'Recreate the template and the group.')
+    );
+  }
+
+  const desired = Math.max(group.minSize, Math.min(group.maxSize, Math.trunc(targetSize)));
+
+  if (desired === group.vmIds.length) {
+    const unchanged: InstanceGroup = { ...group, status: 'STABLE' };
+    return ok(
+      { state: { ...state, instanceGroups: replaceGroup(state, unchanged) }, group: unchanged },
+      `Instance group "${group.name}" is already at ${desired} instance(s).`
+    );
+  }
+
+  // Scale down: remove the newest instances first, as GCP does.
+  if (desired < group.vmIds.length) {
+    const dropIds = new Set(group.vmIds.slice(desired));
+    const removed = state.vms.filter((v) => dropIds.has(v.id)).map((v) => v.name);
+
+    // Detach and delete disks belonging only to removed instances.
+    let next = state;
+    for (const vm of state.vms.filter((v) => dropIds.has(v.id))) {
+      for (const diskId of vm.diskIds) {
+        const disk = next.disks.find((d) => d.id === diskId);
+        if (disk?.attachedVmId === vm.id) {
+          next = { ...next, disks: next.disks.map((d) => (d.id === diskId ? { ...d, attachedVmId: null, status: 'READY' } : d)) };
+        }
+      }
+    }
+    next = {
+      ...next,
+      vms: next.vms.filter((v) => !dropIds.has(v.id)),
+      disks: next.disks.map((d) =>
+        dropIds.has(d.attachedVmId ?? '') ? { ...d, attachedVmId: null, isBootDisk: false, status: 'READY' as const } : d
+      ),
+    };
+
+    const scaled: InstanceGroup = { ...group, vmIds: group.vmIds.slice(0, desired), status: 'STABLE' };
+    const logged = logEvent(
+      { ...next, instanceGroups: replaceGroup(next, scaled) },
+      'compute.instanceGroups.update',
+      `projects/${state.project.projectNumber}/zones/${template.zone}/instanceGroups/${group.name}`,
+      'SUCCESS',
+      `targetSize=${desired}, removed ${removed.join(', ')}`
+    );
+
+    return ok(
+      { state: logged, group: scaled },
+      `Instance group "${group.name}" scaled to ${desired} instance(s). Removed ${removed.join(', ')}.`
+    );
+  }
+
+  // Scale up: create the missing instances.
+  let next = state;
+  const created: string[] = [];
+  for (let i = group.vmIds.length; i < desired; i += 1) {
+    const name = `${group.name}-${stableHash(`${group.id}-${i}`).toString(36)}`;
+    if (next.vms.some((v) => v.name === name)) continue;
+
+    const result = createVmFromTemplate(next, template, name);
+    if (!result.ok) {
+      // A clone failing is a real failure: stop and report why rather than
+      // silently delivering fewer instances than requested.
+      const message = result.ok ? '' : result.message;
+      return logFailure(
+        next,
+        'compute.instanceGroups.update',
+        `instanceGroups/${group.name}`,
+        err('DEPENDENCY', `Could not scale "${group.name}" to ${desired}: ${message}`, 'Fix the template, then retry the resize.')
+      );
+    }
+
+    next = result.value.state;
+    created.push(result.value.vm.name);
+  }
+
+  const newIds = next.vms.filter((v) => created.includes(v.name)).map((v) => v.id);
+  const scaled: InstanceGroup = { ...group, vmIds: [...group.vmIds, ...newIds], status: 'STABLE' };
+  const logged = logEvent(
+    { ...next, instanceGroups: replaceGroup(next, scaled) },
+    'compute.instanceGroups.update',
+    `projects/${state.project.projectNumber}/zones/${template.zone}/instanceGroups/${group.name}`,
+    'SUCCESS',
+    `targetSize=${desired}, created ${created.join(', ')}`
+  );
+
+  return ok({ state: logged, group: scaled }, `Instance group "${group.name}" scaled to ${desired} instance(s).`);
+}
+
+function replaceGroup(state: SimState, group: InstanceGroup): InstanceGroup[] {
+  return state.instanceGroups.map((g) => (g.id === group.id ? group : g));
+}
+
+export function createInstanceGroup(
+  state: SimState,
+  input: {
+    name: string;
+    templateId: string;
+    targetSize?: number;
+    minSize?: number;
+    maxSize?: number;
+  }
+): SimResult<{ state: SimState; group: InstanceGroup }> {
+  const nameError = validateName(input.name, 'Instance group');
+  if (nameError) return logFailure(state, 'compute.instanceGroups.insert', `instanceGroups/${input.name}`, nameError);
+  const dup = duplicateName(state.instanceGroups, input.name.trim(), 'Instance group');
+  if (dup) return logFailure(state, 'compute.instanceGroups.insert', `instanceGroups/${input.name}`, dup);
+
+  const template = state.instanceTemplates.find((t) => t.id === input.templateId);
+  if (!template) {
+    return logFailure(
+      state,
+      'compute.instanceGroups.insert',
+      `instanceGroups/${input.name}`,
+      notFound('Instance template')
+    );
+  }
+
+  const maxSize = input.maxSize ?? 10;
+  const minSize = input.minSize ?? 0;
+  if (!Number.isInteger(maxSize) || maxSize < 1 || maxSize > 1000) {
+    return logFailure(
+      state,
+      'compute.instanceGroups.insert',
+      `instanceGroups/${input.name}`,
+      err('INVALID_ARGUMENT', `maxSize ${maxSize} is out of range.`, 'Enter a whole number between 1 and 1000.')
+    );
+  }
+  if (!Number.isInteger(minSize) || minSize < 0 || minSize > maxSize) {
+    return logFailure(
+      state,
+      'compute.instanceGroups.insert',
+      `instanceGroups/${input.name}`,
+      err('INVALID_ARGUMENT', `minSize ${minSize} must be between 0 and maxSize (${maxSize}).`, 'Raise maxSize or lower minSize.')
+    );
+  }
+
+  const targetSize = input.targetSize ?? minSize;
+  if (!Number.isInteger(targetSize) || targetSize < minSize || targetSize > maxSize) {
+    return logFailure(
+      state,
+      'compute.instanceGroups.insert',
+      `instanceGroups/${input.name}`,
+      err(
+        'INVALID_ARGUMENT',
+        `targetSize ${targetSize} must be between minSize (${minSize}) and maxSize (${maxSize}).`,
+        'Set a target inside the autoscaling bounds.'
+      )
+    );
+  }
+
+  const idResult = nextId(state, 'mig');
+  const group: InstanceGroup = {
+    id: idResult.id,
+    name: input.name.trim(),
+    templateId: template.id,
+    targetSize,
+    minSize,
+    maxSize,
+    vmIds: [],
+    status: 'CREATING',
+    createdAt: new Date().toISOString(),
+  };
+
+  // Create the initial instances through the resize path so creation and later
+  // scaling behave identically.
+  const resized = resizeInstanceGroup({ ...idResult.state, instanceGroups: [...idResult.state.instanceGroups, group] }, group.id, targetSize);
+  if (!resized.ok) return resized;
+
+  const finalGroup = resized.value.group;
+  return ok(
+    { state: resized.value.state, group: finalGroup },
+    `Instance group "${finalGroup.name}" created with ${finalGroup.vmIds.length} instance(s) (min ${finalGroup.minSize}, max ${finalGroup.maxSize}).`
+  );
+}
+
+/**
+ * Delete a group and every VM it owns.
+ *
+ * The group's VMs are deleted outright; unmanaged VMs are never touched, which
+ * is the behaviour a learner would expect from "delete the group".
+ */
+export function deleteInstanceGroup(state: SimState, groupId: string): SimResult<{ state: SimState }> {
+  const group = state.instanceGroups.find((g) => g.id === groupId);
+  if (!group) {
+    return logFailure(state, 'compute.instanceGroups.delete', `instanceGroups/${groupId}`, notFound('Instance group'));
+  }
+
+  const owned = new Set(group.vmIds);
+  const removedNames = state.vms.filter((v) => owned.has(v.id)).map((v) => v.name);
+
+  // Release the group's instances from any load balancer backend list first.
+  const next: SimState = {
+    ...state,
+    vms: state.vms.filter((v) => !owned.has(v.id)),
+    disks: state.disks.map((d) =>
+      d.attachedVmId && owned.has(d.attachedVmId)
+        ? { ...d, attachedVmId: null, isBootDisk: false, status: 'READY' as const }
+        : d
+    ),
+    loadBalancers: state.loadBalancers.map((lb) => ({
+      ...lb,
+      backendVmIds: lb.backendVmIds.filter((id) => !owned.has(id)),
+    })),
+    instanceGroups: state.instanceGroups.filter((g) => g.id !== groupId),
+  };
+
+  const logged = logEvent(
+    next,
+    'compute.instanceGroups.delete',
+    `projects/${state.project.projectNumber}/instanceGroups/${group.name}`,
+    'SUCCESS',
+    `removed ${removedNames.join(', ') || 'no instances'}`
+  );
+
+  return ok({ state: logged }, `Instance group "${group.name}" deleted with ${removedNames.length} instance(s).`);
+}
+
+/** VMs currently owned by a group, in creation order. */
+export function instanceGroupVms(state: SimState, group: InstanceGroup): Vm[] {
+  return group.vmIds.map((id) => state.vms.find((v) => v.id === id)).filter((v): v is Vm => Boolean(v));
+}
+
+/**
+ * Flatten a load balancer's backends to the VMs that actually serve traffic.
+ *
+ * Group-managed instances appear automatically because they appear in `state.vms`,
+ * so a load balancer in front of a MIG needs no backend list.
+ */
+export function loadBalancerBackends(state: SimState, lb: LoadBalancer): Vm[] {
+  return lb.backendVmIds.map((id) => state.vms.find((v) => v.id === id)).filter((v): v is Vm => Boolean(v));
+}
