@@ -217,6 +217,361 @@ export interface Rule {
   description: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Kubernetes Engine                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A simulated GKE cluster.
+ *
+ * The important modelling decision is that a cluster's nodes are real VM
+ * instances in the lab's VPC rather than a separate invented resource. That
+ * means the packet tracer, the topology graph and the firewall policies all
+ * work against a cluster without any special cases: a blocked kubelet port
+ * shows up as a blocked packet, exactly as it would on a real network.
+ */
+export interface K8sCluster {
+  id: string;
+  name: string;
+  vpcId: string;
+  /** Subnet the control plane and nodes are attached to. */
+  subnetId: string;
+  region: string;
+  zone: string;
+  machineType: string;
+  version: string;
+  nodeCount: number;
+  minNodeCount: number;
+  maxNodeCount: number;
+  /** Backing VM instances, in creation order. */
+  vmIds: string[];
+  /** Simulated API server address the control plane is reachable on. */
+  endpoint: string;
+  /** Node network tag, which firewall policies key off. */
+  networkTag: string;
+  status: 'PROVISIONING' | 'RUNNING' | 'RECONCILING' | 'DELETING' | 'DELETED' | 'ERROR';
+  createdAt: string;
+}
+
+export interface K8sNamespace {
+  id: string;
+  name: string;
+  clusterId: string;
+  labels: Record<string, string>;
+  status: 'ACTIVE' | 'TERMINATING';
+  createdAt: string;
+}
+
+/**
+ * A Deployment owns a number of replicas of a container image.
+ *
+ * Pods themselves are derived from the deployment rather than stored, so a
+ * replica count and the list of pods can never disagree.
+ */
+export interface K8sDeployment {
+  id: string;
+  name: string;
+  clusterId: string;
+  namespaceId: string;
+  replicas: number;
+  image: string;
+  containerPort: number;
+  /** Selector labels; services match on these to build their endpoints. */
+  labels: Record<string, string>;
+  env: Record<string, string>;
+  /** Optional persistent volume claim bound to the replicas. */
+  pvcId?: string;
+  readyReplicas: number;
+  /** Bumped on every image change, mirroring the revision history concept. */
+  revision: number;
+  status: 'PROVISIONING' | 'RUNNING' | 'UPDATING' | 'DEGRADED' | 'DELETING' | 'DELETED';
+  createdAt: string;
+}
+
+/** A Service load-balances across the pods its selector matches. */
+export interface K8sService {
+  id: string;
+  name: string;
+  clusterId: string;
+  namespaceId: string;
+  type: 'ClusterIP' | 'NodePort' | 'LoadBalancer';
+  clusterIp: string;
+  nodePort?: number;
+  /** Allocated only for LoadBalancer services. */
+  externalIp?: string;
+  selector: Record<string, string>;
+  port: number;
+  targetPort: number;
+  protocol: 'TCP' | 'UDP';
+  /** Load balancer provisioned in the VPC, for LoadBalancer services and gateways. */
+  lbId?: string;
+  status: 'PENDING' | 'RUNNING' | 'DELETING' | 'DELETED';
+  createdAt: string;
+}
+
+/** An Ingress routes host/path traffic to a Service inside the cluster. */
+export interface K8sIngress {
+  id: string;
+  name: string;
+  clusterId: string;
+  namespaceId: string;
+  /** Host rule; "*" accepts any Host header. */
+  host: string;
+  path: string;
+  serviceId: string;
+  servicePort: number;
+  tls: boolean;
+  status: 'PROVISIONING' | 'RUNNING' | 'DELETING' | 'DELETED';
+  createdAt: string;
+}
+
+/**
+ * A Gateway is the GKE Gateway API resource that fronts one or more Services.
+ *
+ * Creating one provisions a real load balancer in the lab VPC and opens the
+ * firewall rules that load balancer needs, so the traffic path a learner
+ * inspects is the same path the simulator actually evaluates.
+ */
+export interface K8sGateway {
+  id: string;
+  name: string;
+  clusterId: string;
+  namespaceId: string;
+  className: 'gke-l7-global-external' | 'gke-l7-regional-internal-external';
+  /** Services routed by this gateway, with the port each receives on. */
+  routes: { serviceId: string; port: number }[];
+  listenerPort: number;
+  tls: boolean;
+  /** Frontend address of the provisioned load balancer. */
+  address?: string;
+  /** Load balancer provisioned in the lab VPC. */
+  lbId?: string;
+  /**
+   * Second frontend for a regional gateway: the internal load balancer that
+   * serves in-VPC clients. Tracked separately so cluster teardown reclaims it.
+   */
+  internalLbId?: string;
+  status: 'PROVISIONING' | 'RUNNING' | 'DELETING' | 'DELETED';
+  createdAt: string;
+}
+
+export interface K8sConfigMap {
+  id: string;
+  name: string;
+  clusterId: string;
+  namespaceId: string;
+  data: Record<string, string>;
+  status: 'ACTIVE' | 'DELETING';
+  createdAt: string;
+}
+
+export interface K8sSecret {
+  id: string;
+  name: string;
+  clusterId: string;
+  namespaceId: string;
+  type: 'Opaque' | 'kubernetes.io/basic-auth';
+  /**
+   * Base64-ish encoded values, as Kubernetes stores them. These are simulated
+   * credentials for the lab and are never real secrets.
+   */
+  data: Record<string, string>;
+  status: 'ACTIVE' | 'DELETING';
+  createdAt: string;
+}
+
+export interface K8sPersistentVolumeClaim {
+  id: string;
+  name: string;
+  clusterId: string;
+  namespaceId: string;
+  storageGb: number;
+  accessMode: 'ReadWriteOnce' | 'ReadWriteMany';
+  /** Persistent disk backing the claim. */
+  diskId?: string;
+  status: 'PENDING' | 'BOUND' | 'RELEASED' | 'DELETING';
+  createdAt: string;
+}
+
+/** Horizontal Pod Autoscaler: keeps a deployment inside a CPU-driven range. */
+export interface K8sAutoscaler {
+  id: string;
+  name: string;
+  clusterId: string;
+  namespaceId: string;
+  deploymentId: string;
+  minReplicas: number;
+  maxReplicas: number;
+  /** Target average CPU utilisation percentage that triggers a scale event. */
+  targetCpuUtilization: number;
+  /** Simulated current utilisation, used to decide the autoscaler's action. */
+  currentCpuUtilization: number;
+  lastScaleAt?: string;
+  status: 'ACTIVE' | 'DELETING';
+  createdAt: string;
+}
+
+/**
+ * A pod, derived from its Deployment rather than stored in the state.
+ *
+ * Keeping pods derived means the replica count and the pod list are always the
+ * same fact expressed twice, so they cannot drift apart.
+ */
+export interface K8sPod {
+  name: string;
+  deploymentId: string;
+  namespace: string;
+  phase: 'Running' | 'Pending' | 'CrashLoopBackOff' | 'Terminating';
+  ip: string;
+  nodeVmId?: string;
+  ready: boolean;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cloud SQL and AlloyDB                                              */
+/* ------------------------------------------------------------------ */
+
+export type SqlEngineVersion =
+  | 'POSTGRES_14'
+  | 'POSTGRES_16'
+  | 'MYSQL_8_0'
+  | 'SQLSERVER_2022_STANDARD'
+  /** AlloyDB is a PostgreSQL-compatible engine with a different tier model. */
+  | 'ALLOYDB';
+
+export interface SqlInstance {
+  id: string;
+  name: string;
+  engine: SqlEngineVersion;
+  region: string;
+  /** Machine tier, e.g. db-custom-2-7680 or db-perf-optimized-N. */
+  tier: string;
+  /** Provisioned storage in GiB. */
+  storageGb: number;
+  /** Storage auto-grow is on by default in GCP. */
+  storageAutoResize: boolean;
+  vpcId?: string;
+  privateIp?: string;
+  /** Public IPs only exist when the instance has a public IP enabled. */
+  publicIp?: string;
+  connectivity: 'PRIVATE' | 'PUBLIC';
+  state: 'RUNNABLE' | 'STOPPED' | 'PROVISIONING';
+  deletionProtection: boolean;
+  automatedBackupEnabled: boolean;
+  automatedBackupRetentionDays: number;
+  pointInTimeRecoveryEnabled: boolean;
+  ipv4Enabled: boolean;
+  privateServiceAccess: boolean;
+  createdAt: string;
+}
+
+export interface SqlDatabase {
+  id: string;
+  instanceId: string;
+  name: string;
+  charset?: string;
+  collation?: string;
+  /** AlloyDB databases belong to a cluster, and can be created online. */
+  onlineDdl: boolean;
+  createdAt: string;
+}
+
+export interface SqlUser {
+  id: string;
+  instanceId: string;
+  name: string;
+  type: 'BUILT_IN' | 'CLOUD_IAM_SERVICE_ACCOUNT' | 'ALLOYDB_IAM_PRINCIPAL';
+  /** Never stored in plain sight: the console only ever shows a masked hint. */
+  passwordHint: string;
+  createdAt: string;
+}
+
+export interface SqlBackup {
+  id: string;
+  instanceId: string;
+  type: 'AUTOMATED' | 'ON_DEMAND';
+  state: 'SUCCESSFUL' | 'FAILED';
+  sizeGb: number;
+  /** On-demand backups cannot be deleted; automated ones roll off. */
+  retained: boolean;
+  createdAt: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cloud KMS                                                          */
+/* ------------------------------------------------------------------ */
+
+export interface KmsKeyRing {
+  id: string;
+  name: string;
+  /** Key rings are regional, unlike keys in most other services. */
+  location: string;
+  createdAt: string;
+}
+
+export interface KmsKey {
+  id: string;
+  keyRingId: string;
+  name: string;
+  purpose: 'ENCRYPT_DECRYPT' | 'ASYMMETRIC_SIGN' | 'MAC';
+  algorithm: string;
+  state: 'ENABLED' | 'DISABLED' | 'PENDING_DESTRUCTION' | 'DESTROYED';
+  protectionLevel: 'SOFTWARE' | 'HSM' | 'EXTERNAL';
+  /** Primary version is what encrypt operations use. */
+  primaryVersionId?: string;
+  rotationPeriodDays: number;
+  nextRotationAt?: string;
+  /** Set once destroy is requested; the key is unusable after 7 days. */
+  destroyScheduledAt?: string;
+  createdAt: string;
+}
+
+export interface KmsKeyVersion {
+  id: string;
+  keyId: string;
+  /** Versions are monotonic, so learners can see which one encrypts today. */
+  state: 'ENABLED' | 'DISABLED' | 'PENDING_DESTRUCTION' | 'DESTROYED';
+  algorithm: string;
+  createdAt: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Monitoring and alerting                                            */
+/* ------------------------------------------------------------------ */
+
+export interface AlertPolicy {
+  id: string;
+  name: string;
+  /** Resource the policy watches, e.g. a cluster id or load balancer id. */
+  targetId?: string;
+  metric: 'cpu.utilization' | 'memory.utilization' | 'loadBalancer.backendCount' | 'disk.usedFraction' | 'sql.cpu.utilization';
+  /** Threshold in percent; the metric is compared against it. */
+  threshold: number;
+  /** How long the metric must breach before the alert fires. */
+  durationSeconds: number;
+  severity: 'WARNING' | 'CRITICAL';
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface UptimeCheck {
+  id: string;
+  name: string;
+  /** Full URL being polled, e.g. http://35.190.0.1/ */
+  url: string;
+  host: string;
+  path: string;
+  port: number;
+  /** Check interval; GCP's minimum for a custom check is 60 seconds. */
+  periodSeconds: number;
+  timeoutSeconds: number;
+  lastCheckAt?: string;
+  /** 0-100 success rate over the retention window. */
+  successRate: number;
+  latencyMs: number;
+  state: 'UP' | 'DOWN' | 'UNKNOWN';
+}
+
 export interface EventLogEntry {
   id: string;
   timestamp: string;
@@ -248,6 +603,31 @@ export interface SimState {
   instanceGroups: InstanceGroup[];
   snapshots: DiskSnapshot[];
   nsgs: Nsg[];
+  /* Cloud SQL and AlloyDB. Both share the instance/database/user/backup model;
+     only the engine and tier naming differ. */
+  sqlInstances: SqlInstance[];
+  sqlDatabases: SqlDatabase[];
+  sqlUsers: SqlUser[];
+  sqlBackups: SqlBackup[];
+  /* Cloud KMS. Key rings are regional; keys and versions hang off them. */
+  kmsKeyRings: KmsKeyRing[];
+  kmsKeys: KmsKey[];
+  kmsKeyVersions: KmsKeyVersion[];
+  /* Cloud Monitoring alerting policies and uptime checks. */
+  alertPolicies: AlertPolicy[];
+  uptimeChecks: UptimeCheck[];
+  /* Kubernetes Engine. All resources are scoped to a cluster, which is itself
+     anchored in a VPC so the networking lab can reason about node traffic. */
+  k8sClusters: K8sCluster[];
+  k8sNamespaces: K8sNamespace[];
+  k8sDeployments: K8sDeployment[];
+  k8sServices: K8sService[];
+  k8sIngresses: K8sIngress[];
+  k8sGateways: K8sGateway[];
+  k8sConfigMaps: K8sConfigMap[];
+  k8sSecrets: K8sSecret[];
+  k8sPvcs: K8sPersistentVolumeClaim[];
+  k8sAutoscalers: K8sAutoscaler[];
   events: EventLogEntry[];
   traces: TraceRecord[];
   /** Monotonic counter used for deterministic ID generation and LB round-robin. */

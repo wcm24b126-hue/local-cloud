@@ -79,9 +79,84 @@ export function createInitialState(project?: Partial<Project>): SimState {
     instanceGroups: [],
     snapshots: [],
     nsgs: [],
+    sqlInstances: [],
+    sqlDatabases: [],
+    sqlUsers: [],
+    sqlBackups: [],
+    kmsKeyRings: [],
+    kmsKeys: [],
+    kmsKeyVersions: [],
+    alertPolicies: [],
+    uptimeChecks: [],
+    k8sClusters: [],
+    k8sNamespaces: [],
+    k8sDeployments: [],
+    k8sServices: [],
+    k8sIngresses: [],
+    k8sGateways: [],
+    k8sConfigMaps: [],
+    k8sSecrets: [],
+    k8sPvcs: [],
+    k8sAutoscalers: [],
     events: [],
     traces: [],
     sequence: 0,
+  };
+}
+
+/**
+ * Fill in anything a persisted state is missing.
+ *
+ * Labs are saved to localStorage, so a state written by an older build can lack
+ * arrays that newer builds added. Without this the first page that reads a new
+ * collection would throw on `undefined.length`. Normalising on load keeps old
+ * saves working instead of forcing a reset.
+ */
+export function normalizeSimState(input: Partial<SimState> | null | undefined): SimState {
+  const base = createInitialState(input?.project);
+  if (!input || typeof input !== 'object') return base;
+
+  // Only collections the state actually declares are copied, so a state that
+  // predates a collection genuinely starts empty rather than inheriting a
+  // fabricated default.
+  const pick = <K extends keyof SimState>(key: K): SimState[K] =>
+    (Array.isArray(input[key]) ? input[key] : base[key]) as SimState[K];
+
+  return {
+    project: input.project ?? base.project,
+    vpcs: pick('vpcs'),
+    subnets: pick('subnets'),
+    vms: pick('vms'),
+    disks: pick('disks'),
+    gateways: pick('gateways'),
+    routes: pick('routes'),
+    loadBalancers: pick('loadBalancers'),
+    instanceTemplates: pick('instanceTemplates'),
+    instanceGroups: pick('instanceGroups'),
+    snapshots: pick('snapshots'),
+    nsgs: pick('nsgs'),
+    sqlInstances: pick('sqlInstances'),
+    sqlDatabases: pick('sqlDatabases'),
+    sqlUsers: pick('sqlUsers'),
+    sqlBackups: pick('sqlBackups'),
+    kmsKeyRings: pick('kmsKeyRings'),
+    kmsKeys: pick('kmsKeys'),
+    kmsKeyVersions: pick('kmsKeyVersions'),
+    alertPolicies: pick('alertPolicies'),
+    uptimeChecks: pick('uptimeChecks'),
+    k8sClusters: pick('k8sClusters'),
+    k8sNamespaces: pick('k8sNamespaces'),
+    k8sDeployments: pick('k8sDeployments'),
+    k8sServices: pick('k8sServices'),
+    k8sIngresses: pick('k8sIngresses'),
+    k8sGateways: pick('k8sGateways'),
+    k8sConfigMaps: pick('k8sConfigMaps'),
+    k8sSecrets: pick('k8sSecrets'),
+    k8sPvcs: pick('k8sPvcs'),
+    k8sAutoscalers: pick('k8sAutoscalers'),
+    events: pick('events'),
+    traces: pick('traces'),
+    sequence: typeof input.sequence === 'number' && Number.isFinite(input.sequence) ? input.sequence : 0,
   };
 }
 
@@ -89,12 +164,12 @@ export function createInitialState(project?: Partial<Project>): SimState {
 /* internals                                                           */
 /* ------------------------------------------------------------------ */
 
-function nextId(state: SimState, prefix: string): { id: string; state: SimState } {
+export function nextId(state: SimState, prefix: string): { id: string; state: SimState } {
   const sequence = state.sequence + 1;
   return { id: `${prefix}-${sequence}`, state: { ...state, sequence } };
 }
 
-function logEvent(
+export function logEvent(
   state: SimState,
   action: string,
   resource: string,
@@ -138,7 +213,7 @@ export function validateName(name: string, kind: string): SimError | null {
   return null;
 }
 
-function duplicateName(existing: { name: string }[], name: string, kind: string): SimError | null {
+export function duplicateName(existing: { name: string }[], name: string, kind: string): SimError | null {
   if (existing.some((item) => item.name === name)) {
     return err(
       'DUPLICATE_NAME',
@@ -149,11 +224,11 @@ function duplicateName(existing: { name: string }[], name: string, kind: string)
   return null;
 }
 
-function findSubnet(state: SimState, subnetId: string): Subnet | undefined {
+export function findSubnet(state: SimState, subnetId: string): Subnet | undefined {
   return state.subnets.find((s) => s.id === subnetId);
 }
 
-function findVpc(state: SimState, vpcId: string): Vpc | undefined {
+export function findVpc(state: SimState, vpcId: string): Vpc | undefined {
   return state.vpcs.find((v) => v.id === vpcId);
 }
 
@@ -1546,7 +1621,7 @@ export function evaluateEgressFor(
 /* helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-function notFound(kind: string): SimError {
+export function notFound(kind: string): SimError {
   return err(
     'NOT_FOUND',
     `${kind} was not found.`,

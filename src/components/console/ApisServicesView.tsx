@@ -17,7 +17,9 @@ import {
 } from 'lucide-react';
 import { useLocalCloud } from '../../context/LocalCloudContext';
 
-export const ApisServicesView: React.FC = () => {
+type ApiTab = 'enabled' | 'library';
+
+export const ApisServicesView: React.FC<{ initialTab?: ApiTab }> = ({ initialTab = 'enabled' }) => {
   const {
     apiServices,
     toggleApi,
@@ -25,7 +27,7 @@ export const ApisServicesView: React.FC = () => {
     showToast,
   } = useLocalCloud();
 
-  const [activeTab, setActiveTab] = useState<'enabled' | 'library'>('enabled');
+  const [activeTab, setActiveTab] = useState<ApiTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 

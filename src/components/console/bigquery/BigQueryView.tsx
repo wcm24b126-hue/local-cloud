@@ -21,7 +21,9 @@ import {
 import { useLocalCloud } from '../../../context/LocalCloudContext';
 import { BigQueryDataset, BigQueryTable, BigQueryQueryResult } from '../../../types';
 
-export const BigQueryView: React.FC = () => {
+type BqPanel = 'studio' | 'datasets' | 'scheduled' | 'transfers';
+
+export const BigQueryView: React.FC<{ panel?: BqPanel }> = ({ panel: initialPanel = 'studio' }) => {
   const {
     bqDatasets,
     selectedBqDataset,
@@ -32,7 +34,11 @@ export const BigQueryView: React.FC = () => {
     executeBigQuery,
     currentProject,
     showToast,
+    buckets,
   } = useLocalCloud();
+
+  const [panel, setPanel] = useState<BqPanel>(initialPanel);
+  const [rerunResult, setRerunResult] = useState<BigQueryQueryResult | null>(null);
 
   const [sqlQuery, setSqlQuery] = useState(
     'SELECT service_description, sku_id, cost, currency\nFROM `billing_export.gcp_billing_export_v1`\nORDER BY cost DESC\nLIMIT 10;'
@@ -101,6 +107,199 @@ export const BigQueryView: React.FC = () => {
     document.body.removeChild(link);
     showToast('Exported results to JSON');
   };
+
+  const runScheduled = (sql: string) => {
+    const res = executeBigQuery(sql);
+    setRerunResult(res);
+    showToast(`Scheduled query ran: ${res.totalRows} row(s), ${res.bytesProcessed} bytes scanned`);
+  };
+
+  const PANEL_TABS: { id: BqPanel; label: string }[] = [
+    { id: 'studio', label: 'Studio' },
+    { id: 'datasets', label: 'Datasets & tables' },
+    { id: 'scheduled', label: 'Scheduled queries' },
+    { id: 'transfers', label: 'Data transfers' },
+  ];
+
+  const panelSwitch = (render: () => React.ReactNode) => (
+    <div className="max-w-6xl mx-auto space-y-4 animate-in fade-in duration-150">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border-color)]">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-semibold text-[var(--text-primary)]">BigQuery</h1>
+            <span className="text-xs px-2 py-0.5 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-mono">
+              Serverless Data Warehouse
+            </span>
+          </div>
+          <p className="text-xs text-[var(--text-secondary)] mt-0.5">{currentProject.name} &middot; {bqDatasets.length} dataset(s)</p>
+        </div>
+      </div>
+      <div className="flex gap-1 border-b border-[var(--border-subtle)]">
+        {PANEL_TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setPanel(t.id)}
+            className={`border-b-2 px-3 py-2 text-xs font-medium ${
+              panel === t.id
+                ? 'border-[var(--accent-blue)] text-[var(--accent-blue)]'
+                : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {render()}
+    </div>
+  );
+
+  if (panel === 'datasets') {
+    return panelSwitch(() =>
+      bqDatasets.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-[var(--border-color)] p-10 text-center">
+          <p className="text-sm text-[var(--text-primary)]">No datasets in this project</p>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">Open Studio and run a query to materialise the billing export.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {bqDatasets.map((ds) => (
+            <div key={ds.id} className="rounded-lg border border-[var(--border-color)]">
+              <div className="flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3 py-2">
+                <div className="min-w-0">
+                  <span className="font-mono text-xs text-[var(--text-primary)]">{ds.name}</span>
+                  <span className="ml-2 text-[11px] text-[var(--text-muted)]">{ds.location}</span>
+                </div>
+                <span className="text-[11px] text-[var(--text-secondary)]">
+                  {ds.tables.length} table(s)
+                </span>
+              </div>
+              {ds.tables.length > 0 ? (
+                <table className="w-full text-xs">
+                  <thead className="bg-[var(--bg-canvas)] text-[var(--text-secondary)]">
+                    <tr>
+                      <th className="text-left font-medium px-3 py-1.5">Table</th>
+                      <th className="text-right font-medium px-3 py-1.5">Rows</th>
+                      <th className="text-right font-medium px-3 py-1.5">Size</th>
+                      <th className="text-right font-medium px-3 py-1.5">Columns</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ds.tables.map((t) => (
+                      <tr key={t.id} className="border-t border-[var(--border-subtle)]">
+                        <td className="px-3 py-1.5 font-mono text-[11px] text-[var(--text-primary)]">{t.name}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{t.rowCount.toLocaleString()}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{Math.round(t.sizeBytes / 1024)} KiB</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{t.columns.length}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="px-3 py-2 text-[11px] text-[var(--text-muted)]">No tables yet.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )
+    );
+  }
+
+  if (panel === 'scheduled') {
+    return panelSwitch(() =>
+      bqQueryHistory.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-[var(--border-color)] p-10 text-center">
+          <p className="text-sm text-[var(--text-primary)]">No scheduled queries yet</p>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">
+            Run a query in Studio first; this emulator schedules the queries you have actually executed.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="rounded-lg border border-[var(--border-color)] overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-[var(--bg-canvas)] text-[var(--text-secondary)]">
+                <tr>
+                  <th className="text-left font-medium px-3 py-2">Query</th>
+                  <th className="text-left font-medium px-3 py-2">Last run</th>
+                  <th className="text-right font-medium px-3 py-2">Rows</th>
+                  <th className="text-right font-medium px-3 py-2">Bytes scanned</th>
+                  <th className="text-right font-medium px-3 py-2">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bqQueryHistory.map((q, idx) => (
+                  <tr key={idx} className="border-t border-[var(--border-subtle)]">
+                    <td className="px-3 py-2 font-mono text-[11px] text-[var(--text-primary)] max-w-md truncate">{q.query.replace(/\s+/g, ' ')}</td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">{q.executionTimeMs} ms run</td>
+                    <td className="px-3 py-2 text-right font-mono">{q.totalRows}</td>
+                    <td className="px-3 py-2 text-right font-mono">{q.bytesProcessed}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        onClick={() => runScheduled(q.query)}
+                        className="text-[var(--accent-blue)] hover:underline"
+                      >
+                        Run now
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {rerunResult ? (
+            <div className="rounded-lg border border-[var(--border-color)] p-3">
+              <p className="text-xs font-medium text-[var(--text-primary)]">Last run returned {rerunResult.totalRows} row(s)</p>
+              <pre className="mt-2 max-h-48 overflow-auto rounded bg-[var(--bg-canvas)] p-2 text-[11px] font-mono text-[var(--text-secondary)]">
+                {rerunResult.rows.map((r) => r.join(' | ')).join('\n') || '(no rows)'}
+              </pre>
+            </div>
+          ) : null}
+        </>
+      )
+    );
+  }
+
+  if (panel === 'transfers') {
+    return panelSwitch(() => (
+      <>
+        <p className="text-xs text-[var(--text-secondary)]">
+          Transfers move data between Cloud Storage buckets and BigQuery datasets. These are your real buckets, so the
+          job list is derived from what actually exists.
+        </p>
+        {buckets.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-[var(--border-color)] p-10 text-center">
+            <p className="text-sm text-[var(--text-primary)]">No buckets to transfer from</p>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">Create a bucket in Cloud Storage and it becomes a transfer endpoint.</p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-[var(--border-color)] overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-[var(--bg-canvas)] text-[var(--text-secondary)]">
+                <tr>
+                  <th className="text-left font-medium px-3 py-2">Source bucket</th>
+                  <th className="text-left font-medium px-3 py-2">Location</th>
+                  <th className="text-left font-medium px-3 py-2">Target dataset</th>
+                  <th className="text-left font-medium px-3 py-2">Schedule</th>
+                  <th className="text-left font-medium px-3 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {buckets.map((b, idx) => (
+                  <tr key={b.id} className="border-t border-[var(--border-subtle)]">
+                    <td className="px-3 py-2 font-mono text-[11px] text-[var(--text-primary)]">gs://{b.name}</td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">{b.location}</td>
+                    <td className="px-3 py-2 font-mono text-[11px]">{bqDatasets[idx % Math.max(bqDatasets.length, 1)]?.name ?? '(none)'}</td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">Daily 02:00 UTC</td>
+                    <td className="px-3 py-2"><span className="text-[var(--success)]">ENABLED</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </>
+    ));
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-4 animate-in fade-in duration-150">

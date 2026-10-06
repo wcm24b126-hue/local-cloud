@@ -172,6 +172,7 @@ export const NavDrawer: React.FC = () => {
                   }`}
                 >
                   <button
+                    data-nav-path={prod.path}
                     onClick={() => handleProductClick(prod)}
                     className="flex items-center gap-3 flex-1 text-left truncate mr-2"
                   >
@@ -215,6 +216,7 @@ export const NavDrawer: React.FC = () => {
                   }`}
                 >
                   <button
+                    data-nav-path={prod.path}
                     onClick={() => handleProductClick(prod)}
                     className="flex items-center gap-3 flex-1 text-left truncate mr-2"
                   >
@@ -323,6 +325,7 @@ export const NavDrawer: React.FC = () => {
                   {group.items.map((item, itemIdx) => (
                     <button
                       key={itemIdx}
+                      data-nav-path={item.path}
                       onClick={() => handleSubmenuClick(item.path, item.title, hoveredProduct.title)}
                       className="w-full text-left px-2.5 py-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--text-primary)] hover:text-[var(--accent-blue)] transition-colors flex items-center justify-between group"
                     >

@@ -17,18 +17,21 @@ import {
 import { useLocalCloud } from '../../../context/LocalCloudContext';
 import { VpcFirewallRule } from '../../../types';
 
-export const VpcNetworkView: React.FC = () => {
+type VpcTab = 'networks' | 'subnets' | 'firewalls' | 'ips';
+
+export const VpcNetworkView: React.FC<{ initialTab?: VpcTab }> = ({ initialTab = 'firewalls' }) => {
   const {
     vpcNetworks,
     vpcSubnets,
     firewallRules,
+    vmInstances,
     createFirewallRule,
     deleteFirewallRule,
     currentProject,
     showToast,
   } = useLocalCloud();
 
-  const [activeTab, setActiveTab] = useState<'networks' | 'subnets' | 'firewalls'>('firewalls');
+  const [activeTab, setActiveTab] = useState<VpcTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateRuleModalOpen, setIsCreateRuleModalOpen] = useState(false);
 
@@ -41,6 +44,17 @@ export const VpcNetworkView: React.FC = () => {
   const [sourceRanges, setSourceRanges] = useState('0.0.0.0/0');
   const [protocolsAndPorts, setProtocolsAndPorts] = useState('tcp:8080');
   const [description, setDescription] = useState('');
+
+  const externalAddresses = vmInstances
+    .filter((vm) => !!vm.externalIp)
+    .map((vm) => ({
+      address: vm.externalIp as string,
+      attachedTo: vm.name,
+      kind: 'Ephemeral',
+      region: vm.zone.split('-').slice(0, 2).join('-'),
+      status: vm.status === 'RUNNING' ? 'IN USE' : 'IN USE',
+      purpose: vm.allowHttp || vm.allowHttps ? 'Web server' : 'Instance access',
+    }));
 
   const filteredRules = firewallRules.filter(
     r =>
@@ -107,6 +121,7 @@ export const VpcNetworkView: React.FC = () => {
           { id: 'firewalls', label: 'Firewall rules', icon: Shield },
           { id: 'subnets', label: 'Subnets', icon: Layers },
           { id: 'networks', label: 'VPC networks', icon: Network },
+          { id: 'ips', label: 'External IP addresses', icon: Globe },
         ].map(t => {
           const isActive = activeTab === t.id;
           const Icon = t.icon;
@@ -278,6 +293,50 @@ export const VpcNetworkView: React.FC = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Tab 4: External IP addresses */}
+      {activeTab === 'ips' && (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-[var(--border-color)] overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-[var(--bg-canvas)] text-[var(--text-secondary)]">
+                <tr>
+                  <th className="text-left font-medium px-3 py-2">Address</th>
+                  <th className="text-left font-medium px-3 py-2">Attached to</th>
+                  <th className="text-left font-medium px-3 py-2">Type</th>
+                  <th className="text-left font-medium px-3 py-2">Region / zone</th>
+                  <th className="text-left font-medium px-3 py-2">Status</th>
+                  <th className="text-left font-medium px-3 py-2">Purpose</th>
+                </tr>
+              </thead>
+              <tbody>
+                {externalAddresses.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-6 text-center text-[var(--text-secondary)]">
+                      No external addresses assigned. Create an instance with an external IP to see it here.
+                    </td>
+                  </tr>
+                ) : (
+                  externalAddresses.map((a) => (
+                    <tr key={a.address} className="border-t border-[var(--border-subtle)]">
+                      <td className="px-3 py-2 font-mono text-[11px] text-[var(--text-primary)]">{a.address}</td>
+                      <td className="px-3 py-2 font-mono text-[11px]">{a.attachedTo}</td>
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">{a.kind}</td>
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">{a.region}</td>
+                      <td className="px-3 py-2 text-[var(--success)]">{a.status}</td>
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">{a.purpose}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-[var(--text-secondary)]">
+            {externalAddresses.filter((a) => a.purpose.includes('Web')).length} address(es) front a web service. Anything
+            attached to an instance is directly reachable from the internet.
+          </p>
         </div>
       )}
 

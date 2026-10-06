@@ -326,6 +326,17 @@ export const NAVIGATION_PRODUCTS: NavigationProduct[] = [
           { title: 'Lab packet tracer', path: 'netlab-tracer' },
           { title: 'Lab topology', path: 'netlab-topology' }
         ]
+      },
+      {
+        groupTitle: 'Kubernetes',
+        items: [
+          { title: 'Kubernetes overview', path: 'k8s-overview' },
+          { title: 'Kubernetes clusters', path: 'k8s-clusters' },
+          { title: 'Kubernetes workloads', path: 'k8s-workloads' },
+          { title: 'Kubernetes services', path: 'k8s-services' },
+          { title: 'Kubernetes gateways', path: 'k8s-gateways' },
+          { title: 'Kubernetes config & storage', path: 'k8s-config' }
+        ]
       }
     ]
   },

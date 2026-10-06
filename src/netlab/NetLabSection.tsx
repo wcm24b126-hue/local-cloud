@@ -4,7 +4,7 @@
  * fake Cloud Shell all keep working.
  */
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useNetLab } from './NetLabContext';
 import { isLabEnabled } from '../sim/mode';
 import { NetLabOverviewPage } from './components/NetLabOverviewPage';
@@ -21,6 +21,12 @@ import { PacketTracerPage } from './components/PacketTracerPage';
 import { GuidedLabPage } from './components/GuidedLabPage';
 import { TopologyGraph } from './components/TopologyGraph';
 import { Card } from './components/ui';
+import { KubernetesOverviewPage } from '../k8s/components/KubernetesOverviewPage';
+import { ClustersPage } from '../k8s/components/ClustersPage';
+import { WorkloadsPage } from '../k8s/components/WorkloadsPage';
+import { ServicesPage } from '../k8s/components/ServicesPage';
+import { GatewaysPage } from '../k8s/components/GatewaysPage';
+import { ConfigStoragePage } from '../k8s/components/ConfigStoragePage';
 
 interface Section {
   id: string;
@@ -42,6 +48,12 @@ const SECTIONS: Section[] = [
   { id: 'netlab-firewall', label: 'Firewall policies', render: () => <FirewallPoliciesPage /> },
   { id: 'netlab-tracer', label: 'Packet tracer', render: () => <PacketTracerPage /> },
   { id: 'netlab-topology', label: 'Topology', render: () => <TopologyOnlyPage /> },
+  { id: 'k8s-overview', label: 'Kubernetes', render: () => <KubernetesOverviewPage /> },
+  { id: 'k8s-clusters', label: 'K8s clusters', render: () => <ClustersPage /> },
+  { id: 'k8s-workloads', label: 'Workloads', render: () => <WorkloadsPage /> },
+  { id: 'k8s-services', label: 'Services', render: () => <ServicesPage /> },
+  { id: 'k8s-gateways', label: 'Gateways', render: () => <GatewaysPage /> },
+  { id: 'k8s-config', label: 'Config & storage', render: () => <ConfigStoragePage /> },
 ];
 
 const TopologyOnlyPage: React.FC = () => (
@@ -115,12 +127,20 @@ export const NetLabSection: React.FC<{ requestedSection?: string }> = ({ request
 
   // External navigation (the console drawer) opens a specific lab page; the
   // context keeps its own section state, so mirror the request across.
+  //
+  // This must react to a *new request*, not to the active section changing.
+  // Depending on `activeSection` made the effect fight the sidebar: clicking a
+  // tab changed the section, which re-ran the effect and immediately snapped
+  // back to the originally requested page.
+  const appliedRequest = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!requestedSection) return;
-    if (sections.some((s) => s.id === requestedSection) && requestedSection !== activeSection) {
+    if (appliedRequest.current === requestedSection) return;
+    if (sections.some((s) => s.id === requestedSection)) {
+      appliedRequest.current = requestedSection;
       setActiveSection(requestedSection);
     }
-  }, [requestedSection, sections, activeSection, setActiveSection]);
+  }, [requestedSection, sections, setActiveSection]);
 
   const section = sections.find((s) => s.id === activeSection) ?? sections[0];
 

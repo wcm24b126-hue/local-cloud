@@ -19,7 +19,9 @@ import {
 import { useLocalCloud } from '../../context/LocalCloudContext';
 import { CloudRole } from '../../types';
 
-export const IamView: React.FC = () => {
+type IamTab = 'members' | 'resources' | 'roles' | 'service-accounts' | 'audit';
+
+export const IamView: React.FC<{ initialTab?: IamTab }> = ({ initialTab = 'members' }) => {
   const {
     currentProject,
     members,
@@ -32,8 +34,31 @@ export const IamView: React.FC = () => {
     showToast,
   } = useLocalCloud();
 
-  const [activeTab, setActiveTab] = useState<'members' | 'roles' | 'service-accounts' | 'audit'>('members');
+  const [activeTab, setActiveTab] = useState<IamTab>(initialTab);
   const [searchFilter, setSearchFilter] = useState('');
+
+  // "Manage resources" view: every distinct scope members are bound on.
+  const resourceScopes = React.useMemo(() => {
+    const scopes = new Map<string, { scope: string; inherited: boolean }>();
+    const projectResource = `projects/${currentProject.id}`;
+    scopes.set(projectResource, { scope: 'Project', inherited: false });
+    for (const m of members) {
+      const inheritedFrom = m.inheritedFrom ?? projectResource;
+      const kind = inheritedFrom.startsWith('organizations/') ? 'Organization' : 'Folder';
+      if (!scopes.has(inheritedFrom)) scopes.set(inheritedFrom, { scope: kind, inherited: true });
+    }
+    return [...scopes.entries()].map(([name, meta]) => {
+      const bound = members.filter((m) => (m.inheritedFrom ?? projectResource) === name);
+      const roles = new Set(bound.flatMap((m) => m.roles.map((r) => r as string)));
+      return {
+        name,
+        scope: meta.scope,
+        memberCount: bound.length,
+        roleCount: roles.size,
+        inherited: meta.inherited,
+      };
+    });
+  }, [members, currentProject.id]);
 
   // Modals
   const [isGrantAccessOpen, setIsGrantAccessOpen] = useState(false);
@@ -204,6 +229,16 @@ export const IamView: React.FC = () => {
           Permissions ({members.length})
         </button>
         <button
+          onClick={() => setActiveTab('resources')}
+          className={`px-4 py-2 border-b-2 transition-colors ${
+            activeTab === 'resources'
+              ? 'border-[var(--accent-blue)] text-[var(--accent-blue)] font-semibold'
+              : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          Resources ({resourceScopes.length})
+        </button>
+        <button
           onClick={() => setActiveTab('roles')}
           className={`px-4 py-2 border-b-2 transition-colors ${
             activeTab === 'roles'
@@ -234,6 +269,41 @@ export const IamView: React.FC = () => {
           Audit logs ({auditLogs.length})
         </button>
       </div>
+
+      {/* Tab: Manage resources (IAM bindings grouped by resource) */}
+      {activeTab === 'resources' && (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-[var(--border-color)] overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-[var(--bg-canvas)] text-[var(--text-secondary)]">
+                <tr>
+                  <th className="text-left font-medium px-3 py-2">Resource</th>
+                  <th className="text-left font-medium px-2">Scope</th>
+                  <th className="text-right font-medium px-3 py-2">Members</th>
+                  <th className="text-right font-medium px-3 py-2">Roles granted</th>
+                  <th className="text-right font-medium px-3 py-2">Inherited</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resourceScopes.map((r) => (
+                  <tr key={r.name} className="border-t border-[var(--border-subtle)]">
+                    <td className="px-3 py-2 font-mono text-[11px] text-[var(--text-primary)]">{r.name}</td>
+                    <td className="px-2 py-2 text-[var(--text-secondary)]">{r.scope}</td>
+                    <td className="px-3 py-2 text-right font-mono">{r.memberCount}</td>
+                    <td className="px-3 py-2 text-right font-mono">{r.roleCount}</td>
+                    <td className="px-3 py-2 text-right text-[var(--text-secondary)]">{r.inherited ? 'Yes' : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-[var(--text-secondary)]">
+            Members bound at folder or organization scope are inherited by every project underneath. Granting a role on
+            <span className="font-mono"> {currentProject.id} </span>
+            only affects this project.
+          </p>
+        </div>
+      )}
 
       {/* Tab 1: Permissions (Members Table) */}
       {activeTab === 'members' && (

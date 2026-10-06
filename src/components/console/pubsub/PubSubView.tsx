@@ -26,7 +26,9 @@ import {
 import { useLocalCloud } from '../../../context/LocalCloudContext';
 import { PubSubTopic, PubSubSubscription, PubSubMessage, PulledMessage } from '../../../types';
 
-export const PubSubView: React.FC = () => {
+type PubSubTab = 'topics' | 'subscriptions' | 'deadletter';
+
+export const PubSubView: React.FC<{ initialTab?: PubSubTab }> = ({ initialTab = 'topics' }) => {
   const {
     pubsubTopics,
     pubsubSubscriptions,
@@ -44,7 +46,7 @@ export const PubSubView: React.FC = () => {
     showToast,
   } = useLocalCloud();
 
-  const [activeTab, setActiveTab] = useState<'topics' | 'subscriptions' | 'deadletter'>('topics');
+  const [activeTab, setActiveTab] = useState<PubSubTab>(initialTab);
   const [selectedTopic, setSelectedTopic] = useState<PubSubTopic | null>(null);
   const [selectedSubscription, setSelectedSubscription] = useState<PubSubSubscription | null>(null);
 
