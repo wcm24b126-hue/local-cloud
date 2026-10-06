@@ -467,7 +467,7 @@ export const VmDetailsView: React.FC = () => {
                         : 'M 0 98 L 300 98'
                     }
                     fill="none"
-                    stroke="#34A853"
+                    stroke="#34D399"
                     strokeWidth="2.5"
                   />
                 </svg>
@@ -492,7 +492,7 @@ export const VmDetailsView: React.FC = () => {
                         : 'M 0 98 L 300 98'
                     }
                     fill="none"
-                    stroke="#FBBC05"
+                    stroke="#FBBF24"
                     strokeWidth="2.5"
                   />
                 </svg>

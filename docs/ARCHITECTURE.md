@@ -2,7 +2,7 @@
 
 ## Overview
 
-**LocalCloud** is an educational, fully local Google Cloud Platform (GCP) emulator. It provides both an authentic, high-fidelity Google Cloud Console web interface and GCP-compatible REST/CLI endpoints so learners can develop cloud engineering skills with zero risk, zero credit card requirements, and zero cloud billing surprises.
+**LocalCloud** is an independent educational project and a fully local Google Cloud Platform (GCP) emulator; it is not affiliated with, sponsored by, or endorsed by Google. It provides both an authentic, high-fidelity Google Cloud Console web interface and GCP-compatible REST/CLI endpoints so learners can develop cloud engineering skills with zero risk, zero credit card requirements, and zero cloud billing surprises.
 
 ---
 

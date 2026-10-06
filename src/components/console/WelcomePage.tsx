@@ -127,17 +127,17 @@ export const WelcomePage: React.FC<WelcomePageProps> = ({ onOpenLearningTrack })
         <div className="absolute top-4 right-4 pointer-events-none hidden md:block">
           <svg width="220" height="130" viewBox="0 0 220 130" fill="none" xmlns="http://www.w3.org/2000/svg">
             {/* Blue dot */}
-            <circle cx="170" cy="30" r="14" fill="#4285F4" fillOpacity="0.85" />
+            <circle cx="170" cy="30" r="14" fill="#818CF8" fillOpacity="0.85" />
             {/* Green blob */}
             <path
               d="M130 80C140 70 165 75 160 95C155 115 130 110 120 100C110 90 120 85 130 80Z"
-              fill="#34A853"
+              fill="#34D399"
               fillOpacity="0.8"
             />
             {/* Yellow circle */}
-            <circle cx="90" cy="45" r="9" fill="#FBBC05" fillOpacity="0.9" />
+            <circle cx="90" cy="45" r="9" fill="#22D3EE" fillOpacity="0.9" />
             {/* Red circle */}
-            <circle cx="45" cy="85" r="11" fill="#EA4335" fillOpacity="0.85" />
+            <circle cx="45" cy="85" r="11" fill="#A78BFA" fillOpacity="0.85" />
             {/* Thin outline triangle */}
             <polygon
               points="105,95 125,125 85,125"

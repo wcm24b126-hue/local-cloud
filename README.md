@@ -2,6 +2,8 @@
 
 > A lightweight, fully local Google Cloud Platform (GCP) emulator with a complete web console UI for students, developers, and educators.
 
+> *LocalCloud is an independent educational project, not affiliated with or endorsed by Google.*
+
 ---
 
 ## 🚀 Quick Start
@@ -40,8 +42,8 @@ pnpm test:e2e    # Playwright browser tests
 
 ## ✨ What's in Phase 0 + Phase 1
 
-1. **Complete Google Cloud Console Web Shell (`AppShell`):**
-   - **Top bar:** Hamburger menu, LocalCloud logo (cloud glyph in 4 Google palette colors), Project Selector pill, wide centered global search bar (`/` shortcut), Gemini-style Assistant panel button, Cloud Shell terminal icon, Notifications bell, Theme toggle (Dark default & Light), User profile menu.
+1. **Complete Google Cloud Console–style Web Shell (`AppShell`):**
+   - **Top bar:** Hamburger menu, LocalCloud logo (four-lobe cloud glyph in LocalCloud's own palette), Project Selector pill, wide centered global search bar (`/` shortcut), Gemini-style Assistant panel button, Cloud Shell terminal icon, Notifications bell, Theme toggle (Dark default & Light), User profile menu.
    - **Navigation Drawer:** Pinned top group (*Cloud Hub*, *Cloud overview*, *Solutions*, *Recently visited*), Favourites with persistent star toggles, All Products list with flyout submenus, "View all products" and "Get API key" buttons.
    - **Inset Page Canvas:** Large rounded-corner dark surface matching Google Cloud Console.
 
